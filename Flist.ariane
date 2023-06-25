@@ -132,6 +132,15 @@ corev_apu/fpga/src/axi_slice/src/axi_r_buffer.sv
 corev_apu/fpga/src/axi_slice/src/axi_aw_buffer.sv
 corev_apu/register_interface/src/apb_to_reg.sv
 corev_apu/register_interface/src/reg_intf.sv
+corev_apu/riscv-aia/rtl/imsic_regmap.sv
+corev_apu/riscv-aia/rtl/imsic_top.sv
+corev_apu/riscv-aia/rtl/axi4_lite_write_master.sv
+corev_apu/riscv-aia/rtl/aplic_top.sv
+corev_apu/riscv-aia/rtl/aplic_regmap.sv
+corev_apu/riscv-aia/rtl/aplic_domain_top.sv
+corev_apu/riscv-aia/rtl/aplic_domain_regctl.sv
+corev_apu/riscv-aia/rtl/aplic_domain_notifier.sv
+corev_apu/riscv-aia/rtl/aplic_domain_gateway.sv
 core/fpu/src/fpu_div_sqrt_mvp/hdl/defs_div_sqrt_mvp.sv
 core/fpu/src/fpu_div_sqrt_mvp/hdl/control_mvp.sv
 core/fpu/src/fpu_div_sqrt_mvp/hdl/div_sqrt_mvp_wrapper.sv

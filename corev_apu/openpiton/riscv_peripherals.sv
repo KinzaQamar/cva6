@@ -28,15 +28,22 @@
 `include "register_interface/typedef.svh"
 
 module riscv_peripherals #(
-    parameter int unsigned DataWidth       = 64,
-    parameter int unsigned NumHarts        =  1,
-    parameter int unsigned NumSources      =  1,
-    parameter int unsigned PlicMaxPriority =  7,
-    parameter bit          SwapEndianess   =  0,
-    parameter logic [63:0] DmBase          = 64'hfff1000000,
-    parameter logic [63:0] RomBase         = 64'hfff1010000,
-    parameter logic [63:0] ClintBase       = 64'hfff1020000,
-    parameter logic [63:0] PlicBase        = 64'hfff1100000
+    parameter int unsigned DataWidth        = 64,
+    parameter int unsigned NumHarts         =  1,
+    parameter int unsigned NumSources       =  1,
+    parameter int unsigned PlicMaxPriority  =  7,
+    parameter bit          SwapEndianess    =  0,
+    parameter logic [63:0] DmBase           = 64'hfff1000000,
+    parameter logic [63:0] RomBase          = 64'hfff1010000,
+    parameter logic [63:0] ClintBase        = 64'hfff1020000,
+    parameter logic [63:0] PlicBase         = 64'hfff1100000,
+    parameter              MODE             = "Direct",
+    parameter int          NR_INTP_FILES    = 2,
+    parameter              NR_BITS_SRC      = 32,
+    parameter              NR_REG           = (NumSources < 32) ? 1 : NumSources/32,
+    parameter              VS_INTP_FILE_LEN = $clog2(NR_INTP_FILES-2),
+    parameter              NR_SRC_LEN       = $clog2(NumSources),
+    parameter int unsigned NR_IDCs          = (MODE == "Direct")? NumHarts : 'd0
 ) (
     input                               clk_i,
     input                               rst_ni,
@@ -90,8 +97,27 @@ module riscv_peripherals #(
     output [NumHarts-1:0]               ipi_o,        // software interrupt (a.k.a inter-process-interrupt)
     // PLIC
     input  [NumSources-1:0]             irq_sources_i,
-    input  [NumSources-1:0]             irq_le_i,     // 0:level 1:edge
-    output [NumHarts-1:0][1:0]          irq_o         // level sensitive IR lines, mip & sip (async)
+    `ifndef USE_APLIC
+      input  [NumSources-1:0]           irq_le_i,     // 0:level 1:edge
+      output [NumHarts-1:0][1:0]        irq_o         // level sensitive IR lines, mip & sip (async)
+    `else
+      // APLIC
+      `ifdef DIRECT_MODE
+       /** Interrupt Notification to Targets. One per priv. level. */
+        output logic [(NR_IDCs*2)-1:0]                   Xeip_targets_o
+      `else
+        // IMSIC
+        output logic [NR_INTP_FILES-1:0]                 Xeip_targets_o,
+        input  logic [1:0]                               priv_lvl_i,
+        input  logic [VS_INTP_FILE_LEN:0]                vgein_i,
+        input  logic [31:0]                              imsic_addr_i,
+        input  logic [31:0]                              imsic_data_i,
+        input  logic                                     imsic_we_i,
+        input  logic                                     imsic_claim_i,
+        output logic [31:0]                              imsic_data_o,
+        output logic [NR_INTP_FILES-1:0][NR_SRC_LEN-1:0] xtopei_o
+      `endif // ifdef DIRECT_MODE
+    `endif // USE_APLIC
 );
 
   localparam int unsigned AxiIdWidth    =  1;
@@ -132,7 +158,7 @@ module riscv_peripherals #(
     .debug_req_bits_op    ( debug_req_bits_op    ),
     .debug_req_bits_data  ( debug_req.data       ),
     .debug_resp_valid     ( debug_resp_valid     ),
-    .debug_resp_ready     ( debug_resp_ready       ),
+    .debug_resp_ready     ( debug_resp_ready     ),
     .debug_resp_bits_resp ( debug_resp.resp      ),
     .debug_resp_bits_data ( debug_resp.data      ),
     .exit                 ( sim_exit             )
@@ -743,21 +769,77 @@ module riscv_peripherals #(
     endcase
   end
 
-  plic_top #(
-    .N_SOURCE    ( NumSources      ),
-    .N_TARGET    ( 2*NumHarts      ),
-    .MAX_PRIO    ( PlicMaxPriority ),
-    .reg_req_t   ( plic_req_t      ),
-    .reg_rsp_t   ( plic_rsp_t      )
-  ) i_plic (
-    .clk_i,
-    .rst_ni,
-    .req_i         ( plic_req    ),
-    .resp_o        ( plic_resp   ),
-    .le_i          ( irq_le_i    ), // 0:level 1:edge
-    .irq_sources_i,                 // already synchronized
-    .eip_targets_o ( irq_o       )
-  );
+  `ifdef MSI_MODE
+    ariane_axi::req_t  msi_req;
+    ariane_axi::resp_t msi_resp;
+  `endif
+
+  `ifndef USE_APLIC
+    plic_top #(
+      .N_SOURCE    ( NumSources      ),
+      .N_TARGET    ( 2*NumHarts      ),
+      .MAX_PRIO    ( PlicMaxPriority ),
+      .reg_req_t   ( plic_req_t      ),
+      .reg_rsp_t   ( plic_rsp_t      )
+    ) i_plic (
+      .clk_i,
+      .rst_ni,
+      .req_i         ( plic_req    ),
+      .resp_o        ( plic_resp   ),
+      .le_i          ( irq_le_i    ), // 0:level 1:edge
+      .irq_sources_i,                 // already synchronized
+      .eip_targets_o ( irq_o       )
+    );
+
+  `else
+    aplic_top #(
+      .MODE       ( MODE       ),  
+      .NR_SRC     ( NumSources ),  
+      .MIN_PRIO   ( 'd1        ),  
+      .NR_IDCs    ( NR_IDCs    ), 
+      .reg_req_t  ( plic_req_t ),  
+      .reg_rsp_t  ( plic_rsp_t )   
+    ) i_aplic (
+      .i_clk		        ( clk_i          ),
+      .ni_rst		        ( rst_ni         ),
+      .i_irq_sources    ( irq_sources_i  ),
+      .i_req_cfg	      ( plic_req       ),
+      .o_resp_cfg	      ( plic_resp      ),
+      `ifdef DIRECT_MODE
+      .o_Xeip_targets   ( Xeip_targets_o )
+      `elsif MSI_MODE
+      .o_req            ( msi_req        ),
+      .i_resp           ( msi_resp       )
+      `endif
+	);
+
+  `endif //USE_APLIC
+
+  imsic_top #(
+    .NR_SRC         ( NumSources         ),
+    .MIN_PRIO       ( 'd6                ),
+    .NR_INTP_FILES  ( 'd2                ),
+    .AXI_ADDR_WIDTH ( 'd64               ),
+    .AXI_DATA_WIDTH ( 'd64               ),
+    .AXI_ID_WIDTH   ( 'd10               ),
+    .axi_req_t      ( ariane_axi::req_t  ),
+    .axi_resp_t     ( ariane_axi::resp_t )
+  ) i_imsic (
+    .i_clk		         ( clk_i             ),
+    .ni_rst		         ( rst_ni            ),
+    .i_req             ( msi_req           ),
+    .o_resp            ( msi_resp          ),
+    .i_priv_lvl        ( priv_lvl_i        ),
+    .i_vgein           ( vgein_i           ),
+    .i_imsic_addr      ( imsic_addr_i      ),
+    .i_imsic_data      ( imsic_data_i      ),
+    .i_imsic_we        ( imsic_we_i        ),
+    .i_imsic_claim     ( imsic_claim_i     ),
+    .o_imsic_data      ( imsic_data_o      ),
+    .o_xtopei          ( xtopei_o          ),
+    .o_Xeip_targets    ( Xeip_targets_o    ),
+    .o_imsic_exception ( imsic_exception_o )
+);
 
 endmodule // riscv_peripherals
 
