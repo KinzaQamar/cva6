@@ -37,7 +37,12 @@ module ariane_verilog_wrap
   parameter logic [NrMaxRules*64-1:0]  CachedRegionAddrBase  = '0,
   parameter logic [NrMaxRules*64-1:0]  CachedRegionLength    = '0,
   // PMP
-  parameter int unsigned               NrPMPEntries          =  8
+  parameter int unsigned               NrPMPEntries          =  8,
+  // IMSIC
+  parameter int                        NumSources             = 1,
+  parameter int                        NR_INTP_FILES          = 2,
+  parameter int                        VS_INTP_FILE_LEN       = $clog2(NR_INTP_FILES-2),
+  parameter int                        NR_SRC_LEN             = $clog2(NumSources)
 ) (
   input                       clk_i,
   input                       reset_l,      // this is an openpiton-specific name, do not change (hier. paths in TB use this)
@@ -212,5 +217,46 @@ module ariane_verilog_wrap
     .axi_resp_i  ( axi_resp  )
 `endif
   );
+
+  // IMSIC
+  logic [1:0]                               priv_lvl;
+  logic [VS_INTP_FILE_LEN:0]                vgein;
+  logic [31:0]                              imsic_addr;
+  logic [31:0]                              imsic_data_i;
+  logic                                     imsic_we;
+  logic                                     imsic_claim;
+  logic [31:0]                              imsic_data_o;
+  logic [NR_INTP_FILES-1:0][NR_SRC_LEN-1:0] xtopei;
+  logic [NR_INTP_FILES-1:0]                 Xeip_targets;
+  logic                                     imsic_exception;
+
+  ariane_axi::req_t  msi_req;
+  ariane_axi::resp_t msi_resp;
+
+  imsic_top #(
+    .NR_SRC         ( NumSources         ),
+    .MIN_PRIO       ( 'd6                ),
+    .NR_INTP_FILES  ( 'd2                ),
+    .AXI_ADDR_WIDTH ( 'd64               ),
+    .AXI_DATA_WIDTH ( 'd64               ),
+    .AXI_ID_WIDTH   ( 'd10               ),
+    .axi_req_t      ( ariane_axi::req_t  ),
+    .axi_resp_t     ( ariane_axi::resp_t )
+  ) i_imsic (
+    .i_clk		         ( clk_i           ),
+    .ni_rst		         ( reset_l         ),
+    .i_req             ( msi_req         ),
+    .o_resp            ( msi_resp        ),
+    .i_priv_lvl        ( priv_lvl        ),
+    .i_vgein           ( vgein           ),
+    .i_imsic_addr      ( imsic_addr      ),
+    .i_imsic_data      ( imsic_data_i    ),
+    .i_imsic_we        ( imsic_we        ),
+    .i_imsic_claim     ( imsic_claim     ),
+    .o_imsic_data      ( imsic_data_o    ),
+    .o_xtopei          ( xtopei          ),
+    .o_Xeip_targets    ( Xeip_targets    ),
+    .o_imsic_exception ( imsic_exception )
+);
 
 endmodule // ariane_verilog_wrap
