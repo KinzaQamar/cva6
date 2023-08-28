@@ -98,9 +98,39 @@ module riscv_peripherals #(
     `elsif  PITON_RV64_APLIC
     // APLIC
     `ifdef DIRECT_MODE
-    ,output [(NR_DOMAINS*NR_IDCs)-1:0]   irq_o   
+    ,output [NumHarts-1:0][(NR_DOMAINS*NR_IDCs)-1:0]   irq_o   
+    `else
+    ,output wire [31:0]                          msi_noc1_axi_awaddr
+    ,output wire                                 msi_noc1_axi_awvalid
+    ,input  wire                                 noc1_msi_axi_awready
+  
+    ,output wire [31:0]                          msi_noc1_axi_wdata
+    ,output wire [3:0]                           msi_noc1_axi_wstrb
+    ,output wire                                 msi_noc1_axi_wvalid
+    ,input  wire                                 noc1_msi_axi_wready
+  
+    ,input  wire [1:0]                           noc1_msi_axi_bresp
+    ,input  wire                                 noc1_msi_axi_bvalid
+    ,output wire                                 msi_noc1_axi_bready
+  
+    ,output wire [31:0]                          msi_noc1_axi_araddr
+    ,output wire                                 msi_noc1_axi_arvalid
+    ,input  wire                                 noc1_msi_axi_arready
+  
+    ,input  wire [31:0]                          noc1_msi_axi_rdata
+    ,input  wire [1:0]                           noc1_msi_axi_rresp
+    ,input  wire                                 noc1_msi_axi_rvalid
+    ,output wire                                 msi_noc1_axi_rready
+    // MSI request to NoC1
+    ,output                              noc1_valid_out
+    ,output [DataWidth-1:0]              noc1_data_out 
+    ,input                               noc1_ready_in 
+    // NoC2 request to MSI
+    ,input                               noc2_valid_in
+    ,input                               noc2_data_in
+    ,output [DataWidth-1:0]              noc2_ready_out
     `endif // DIRECT_MODE
-    `endif 
+    `endif // PITON_RV64_PLIC
 );
 
   localparam int unsigned AxiIdWidth    =  1;
@@ -752,11 +782,6 @@ module riscv_peripherals #(
     endcase
   end
 
-  `ifdef MSI_MODE
-    ariane_axi::req_t  msi_req;
-    ariane_axi::resp_t msi_resp;
-  `endif
-
   `ifdef PITON_RV64_PLIC
     plic_top #(
       .N_SOURCE    ( NumSources      ),
@@ -775,9 +800,14 @@ module riscv_peripherals #(
     );
 
   `elsif PITON_RV64_APLIC
+
+    ariane_axi::req_t msi_req;
+    ariane_axi::resp_t msi_resp;
+
     aplic_top #(
       .NR_SRC     ( NumSources ),  
       .MIN_PRIO   ( 'd1        ),  
+      .NR_DOMAINS ( 2*NumHarts ),
       `ifdef DIRECT_MODE
       .NR_IDCs    ( NumHarts   ), 
       `else
@@ -796,8 +826,111 @@ module riscv_peripherals #(
       `elsif MSI_MODE
       .o_req_msi        ( msi_req        ),
       .i_resp_msi       ( msi_resp       )
-      `endif
-	);
+      `endif // DIRECT_MODE
+	  );
+
+    `ifdef MSI_MODE
+    // tie off signals not used by AXI-lite
+    assign msi_req.aw.id     = '0;
+    assign msi_req.aw.len    = '0;
+    assign msi_req.aw.burst  = '0;
+    assign msi_req.aw.lock   = '0;
+    assign msi_req.aw.cache  = '0;
+    assign msi_req.aw.prot   = '0;
+    assign msi_req.aw.qos    = '0;
+    assign msi_req.aw.region = '0;
+    assign msi_req.aw.atop   = '0;
+    assign msi_req.aw.size   = 3'b010;
+    assign msi_req.aw.user   = '0;
+    assign msi_req.w.last    = 1'b1;
+    assign msi_req.ar.id     = '0;
+    assign msi_req.ar.len    = '0;
+    assign msi_req.ar.size   = 3'b010;
+    assign msi_req.ar.burst  = '0;
+    assign msi_req.ar.lock   = '0;
+    assign msi_req.ar.cache  = '0;
+    assign msi_req.ar.prot   = '0;
+    assign msi_req.ar.qos    = '0;
+    assign msi_req.ar.region = '0;
+    assign msi_req.ar.user   = '0;
+
+    assign msi_noc1_axi_awaddr  = msi_req.aw.addr;
+    assign msi_noc1_axi_awvalid = msi_req.aw_valid;
+    assign msi_resp.aw_ready    = noc1_msi_axi_awready;
+    
+    assign msi_noc1_axi_wdata  = msi_req.w.data;
+    assign msi_noc1_axi_wstrb  = msi_req.w.strb;
+    assign msi_noc1_axi_wvalid = msi_req.w_valid;
+    assign msi_resp.w_ready    = noc1_msi_axi_wready;
+    
+    assign msi_resp.b.resp     = noc1_msi_axi_bresp;
+    assign msi_resp.b_valid    = noc1_msi_axi_bvalid;
+    assign msi_noc1_axi_bready = msi_req.b_ready;
+    
+    assign msi_noc1_axi_araddr  = msi_req.ar.addr;
+    assign msi_noc1_axi_arvalid = msi_req.ar_valid;
+    assign msi_resp.ar_ready    = noc1_msi_axi_arready;
+    
+    assign msi_resp.r.data      = noc1_msi_axi_rdata;
+    assign msi_resp.r.resp      = noc1_msi_axi_rresp;
+    assign msi_resp.r_valid     = noc1_msi_axi_rvalid;
+    assign msi_noc1_axi_rready  = msi_req.r_ready;
+
+    axilite_noc_bridge #(
+      .AXI_LITE_DATA_WIDTH ( 'd32 ),
+      .AXI_LITE_ADDR_WIDTH ( 'd32 ), 
+      .AXI_LITE_RESP_WIDTH ( 'd2  )
+    ) i_aplic_noc_bridge (
+        .clk           ( clk_i  ),
+        .rst_n         ( rst_ni ),
+
+        .noc_valid_out ( noc1_valid_out ),
+        .noc_data_out  ( noc1_data_out  ),
+        .noc_ready_in  ( noc1_ready_in  ),
+   
+        .noc_valid_in  ( noc2_valid_in  ),
+        .noc_data_in   ( noc2_data_in   ),
+        .noc_ready_out ( noc2_ready_out ),
+
+        .src_chipid    (                ),
+        .src_xpos      (                ),
+        .src_ypos      (                ),
+        .src_fbits     (                ),
+
+        .dest_chipid   (                ),
+        .dest_xpos     (                ),
+        .dest_ypos     (                ),
+        .dest_fbits    (                ),
+
+        // AXI Write Address Channel Signals
+        .m_axi_awaddr  ( msi_req.aw.addr   ),
+        .m_axi_awvalid ( msi_req.aw_valid  ),
+        .m_axi_awready ( msi_resp.aw_ready ),
+
+        // AXI Write Data Channel Signals
+        .m_axi_wdata   ( msi_req.w.data   ),
+        .m_axi_wstrb   ( msi_req.w.strb   ),
+        .m_axi_wvalid  ( msi_req.w_valid  ),
+        .m_axi_wready  ( msi_resp.w_ready ),
+
+        // AXI Read Address Channel Signals
+        .m_axi_araddr  ( msi_req.ar.addr   ),
+        .m_axi_arvalid ( msi_req.ar_valid  ),
+        .m_axi_arready ( msi_resp.ar_ready ),
+
+        // AXI Read Data Channel Signals
+        .m_axi_rdata   ( msi_resp.r.data  ),
+        .m_axi_rresp   ( msi_resp.r.resp  ),
+        .m_axi_rvalid  ( msi_resp.r_valid ),
+        .m_axi_rready  ( msi_req.r_ready  ),
+
+       // AXI Write Response Channel Signals
+        .m_axi_bresp   ( msi_resp.b.resp  ),
+        .m_axi_bvalid  ( msi_resp.b_valid ),
+        .m_axi_bready  ( msi_req.b_ready  )
+    );
+
+    `endif // MSI_MODE
 
   `endif //PITON_RV64_APLIC
 
