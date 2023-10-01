@@ -100,35 +100,14 @@ module riscv_peripherals #(
     `ifdef DIRECT_MODE
     ,output [NumHarts-1:0][(NR_DOMAINS*NR_IDCs)-1:0]   irq_o   
     `else
-    ,output wire [31:0]                          msi_noc1_axi_awaddr
-    ,output wire                                 msi_noc1_axi_awvalid
-    ,input  wire                                 noc1_msi_axi_awready
-  
-    ,output wire [31:0]                          msi_noc1_axi_wdata
-    ,output wire [3:0]                           msi_noc1_axi_wstrb
-    ,output wire                                 msi_noc1_axi_wvalid
-    ,input  wire                                 noc1_msi_axi_wready
-  
-    ,input  wire [1:0]                           noc1_msi_axi_bresp
-    ,input  wire                                 noc1_msi_axi_bvalid
-    ,output wire                                 msi_noc1_axi_bready
-  
-    ,output wire [31:0]                          msi_noc1_axi_araddr
-    ,output wire                                 msi_noc1_axi_arvalid
-    ,input  wire                                 noc1_msi_axi_arready
-  
-    ,input  wire [31:0]                          noc1_msi_axi_rdata
-    ,input  wire [1:0]                           noc1_msi_axi_rresp
-    ,input  wire                                 noc1_msi_axi_rvalid
-    ,output wire                                 msi_noc1_axi_rready
     // MSI request to NoC1
-    ,output                              noc1_valid_out
-    ,output [DataWidth-1:0]              noc1_data_out 
-    ,input                               noc1_ready_in 
+    ,output                                            noc1_valid_out
+    ,output [DataWidth-1:0]                            noc1_data_out 
+    ,input                                             noc1_ready_in 
     // NoC2 request to MSI
-    ,input                               noc2_valid_in
-    ,input                               noc2_data_in
-    ,output [DataWidth-1:0]              noc2_ready_out
+    ,input                                             noc2_valid_in
+    ,input  [DataWidth-1:0]                            noc2_data_in
+    ,output                                            noc2_ready_out
     `endif // DIRECT_MODE
     `endif // PITON_RV64_PLIC
 );
@@ -854,31 +833,9 @@ module riscv_peripherals #(
     assign msi_req.ar.region = '0;
     assign msi_req.ar.user   = '0;
 
-    assign msi_noc1_axi_awaddr  = msi_req.aw.addr;
-    assign msi_noc1_axi_awvalid = msi_req.aw_valid;
-    assign msi_resp.aw_ready    = noc1_msi_axi_awready;
-    
-    assign msi_noc1_axi_wdata  = msi_req.w.data;
-    assign msi_noc1_axi_wstrb  = msi_req.w.strb;
-    assign msi_noc1_axi_wvalid = msi_req.w_valid;
-    assign msi_resp.w_ready    = noc1_msi_axi_wready;
-    
-    assign msi_resp.b.resp     = noc1_msi_axi_bresp;
-    assign msi_resp.b_valid    = noc1_msi_axi_bvalid;
-    assign msi_noc1_axi_bready = msi_req.b_ready;
-    
-    assign msi_noc1_axi_araddr  = msi_req.ar.addr;
-    assign msi_noc1_axi_arvalid = msi_req.ar_valid;
-    assign msi_resp.ar_ready    = noc1_msi_axi_arready;
-    
-    assign msi_resp.r.data      = noc1_msi_axi_rdata;
-    assign msi_resp.r.resp      = noc1_msi_axi_rresp;
-    assign msi_resp.r_valid     = noc1_msi_axi_rvalid;
-    assign msi_noc1_axi_rready  = msi_req.r_ready;
-
     axilite_noc_bridge #(
-      .AXI_LITE_DATA_WIDTH ( 'd32 ),
-      .AXI_LITE_ADDR_WIDTH ( 'd32 ), 
+      .AXI_LITE_DATA_WIDTH ( 'd64 ),
+      .AXI_LITE_ADDR_WIDTH ( 'd64 ), 
       .AXI_LITE_RESP_WIDTH ( 'd2  )
     ) i_aplic_noc_bridge (
         .clk           ( clk_i  ),
@@ -892,16 +849,16 @@ module riscv_peripherals #(
         .noc_data_in   ( noc2_data_in   ),
         .noc_ready_out ( noc2_ready_out ),
 
-        .src_chipid    (                ),
-        .src_xpos      (                ),
-        .src_ypos      (                ),
-        .src_fbits     (                ),
+        .src_chipid    ( 'd0            ),
+        .src_xpos      ( 'd0            ),
+        .src_ypos      ( 'd0            ),
+        .src_fbits     ( 'b1110         ),
 
-        .dest_chipid   (                ),
-        .dest_xpos     (                ),
-        .dest_ypos     (                ),
-        .dest_fbits    (                ),
-
+        .dest_chipid   ( 'd0            ),
+        .dest_xpos     ( 'd0            ),
+        .dest_ypos     ( 'd0            ),
+        .dest_fbits    ( 'b1110         ),
+        
         // AXI Write Address Channel Signals
         .m_axi_awaddr  ( msi_req.aw.addr   ),
         .m_axi_awvalid ( msi_req.aw_valid  ),
